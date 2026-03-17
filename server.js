@@ -1,4 +1,4 @@
-import express from "express";
+import express, { json } from "express";
 import Groq from "groq-sdk";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -72,7 +72,7 @@ app.post("/api/queryClassification", async (req, res) => {
 
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: "Something went wrong "});
+    res.status(500).json({ error: "Something went wrong", message: error});
   }
 })
 
@@ -104,9 +104,277 @@ app.post("/api/chat", async (req, res) => {
 
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: "Something went wrong" });
+    res.status(500).json({ error: "Something went wrong", message: error });
   }
 });
+
+
+app.post("/api/chat/dataQuery", async (req, res) => {
+   try {
+    const { message } = req.body;
+
+    const completion = await groq.chat.completions.create({
+      messages: [
+        {
+            role: 'system',
+            content: `You are an expert SQL generator and data analyst for an ocean data system.
+
+                      Your job is to convert user questions into optimized MySQL queries AND decide how the result should be visualized.
+
+                      DATABASE SCHEMA:
+
+                      Table: floats
+                      - float_id (INT, PRIMARY KEY)
+                      - deployment_date (DATE)
+                      - region (VARCHAR)
+                      - latitude (FLOAT)
+                      - longitude (FLOAT)
+
+                      Table: profiles
+                      - id (BIGINT, PRIMARY KEY)
+                      - profile_id (INT)
+                      - float_id (INT, FOREIGN KEY → floats.float_id)
+                      - time (TIMESTAMP)
+                      - latitude (DOUBLE)
+                      - longitude (DOUBLE)
+                      - depth (DOUBLE)
+                      - temperature (DOUBLE)
+                      - salinity (DOUBLE)
+
+                      ---
+
+                      IMPORTANT RULES:
+
+                      1. NEVER return raw large datasets.
+                      2. ALWAYS aggregate data when result can exceed 1000 rows.
+                      3. Use GROUP BY for time-series, depth, or region-based queries.
+                      4. Use LIMIT when needed.
+                      5. Prefer AVG(), MIN(), MAX() for trends.
+                      6. Use DATE(time) or YEAR(time) when grouping by time.
+                      7. Depth-based queries → GROUP BY depth.
+                      8. Time-series queries → GROUP BY DATE(time).
+                      9. Always ORDER results properly.
+
+                      ---
+
+                     OUTPUT RULES (VERY STRICT):
+
+                    - Return ONLY valid JSON
+                    - Do NOT include any explanation
+                    - Do NOT include markdown or backticks
+                    - Do NOT wrap JSON inside a string
+                    - Do NOT add any extra text before or after JSON
+                    - The response must start with { and end with }
+                    - If you violate this, the output is invalid
+
+                    Return ONLY JSON
+
+                      ---
+
+                      LOGIC:
+
+                      - If the query asks for trends, variation, comparison → return "graph"
+                      - If the query asks for a single value → return "scalar"
+                      - If spatial → use "map"
+                      - If depth vs parameter → use "depth_profile"
+
+                      ---
+
+                      EXAMPLES:
+
+                      User: How temperature varies in 2005
+
+                      Output:
+                      {
+                        "type": "graph",
+                        "chart": "line",
+                        "sql": "SELECT DATE(time) as date, AVG(temperature) as avg_temp FROM profiles WHERE YEAR(time)=2005 GROUP BY DATE(time) ORDER BY date",
+                        "x": "date",
+                        "y": "avg_temp",
+                        "data_description": "Average daily temperature for year 2005"
+                      }
+
+                      ---
+
+                      User: What is average temperature in 2005
+
+                      Output:
+                      {
+                        "type": "scalar",
+                        "chart": "none",
+                        "sql": "SELECT AVG(temperature) as avg_temp FROM profiles WHERE YEAR(time)=2005",
+                        "x": "",
+                        "y": "avg_temp",
+                        "data_description": "Average temperature in 2005"
+                      }
+
+                      ---
+
+                      User: Show temperature vs depth
+
+                      Output:
+                      {
+                        "type": "graph",
+                        "chart": "depth_profile",
+                        "sql": "SELECT depth, AVG(temperature) as temperature FROM profiles GROUP BY depth ORDER BY depth",
+                        "x": "temperature",
+                        "y": "depth",
+                        "data_description": "Temperature variation with depth"
+                      }
+
+                      ---
+
+                      User: Show floats near India
+
+                      Output:
+                      {
+                        "type": "graph",
+                        "chart": "map",
+                        "sql": "SELECT latitude, longitude FROM floats WHERE latitude BETWEEN 5 AND 30 AND longitude BETWEEN 60 AND 100 LIMIT 500",
+                        "x": "longitude",
+                        "y": "latitude",
+                        "data_description": "Float locations near India"
+                      }
+                    Now generate the output for the following user query.`,
+        },
+        {
+          role: "user",
+          content: message,
+        },
+      ],
+      model: "llama-3.3-70b-versatile",
+    });
+
+    const data = JSON.parse(completion.choices[0].message.content);
+
+    res.json(data);
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Something went wrong", message: error});
+  } 
+});
+
+
+app.post("/api/chat/hybridQuery", async (req, res) => {
+  try {
+    const { message } = req.body;
+
+    const completion = await groq.chat.completions.create({
+      messages: [
+        {
+            role: 'system',
+            content: `You are an expert ocean data analyst and SQL generator.
+
+                      Your job is to:
+                      1. Generate an optimized MySQL query to retrieve relevant data
+                      2. Provide a clear explanation based on expected data trends
+
+                      ---
+
+                      DATABASE SCHEMA:
+
+                      Table: floats
+                      - float_id (INT, PRIMARY KEY)
+                      - deployment_date (DATE)
+                      - region (VARCHAR)
+                      - latitude (FLOAT)
+                      - longitude (FLOAT)
+
+                      Table: profiles
+                      - id (BIGINT, PRIMARY KEY)
+                      - profile_id (INT)
+                      - float_id (INT, FOREIGN KEY → floats.float_id)
+                      - time (TIMESTAMP)
+                      - latitude (DOUBLE)
+                      - longitude (DOUBLE)
+                      - depth (DOUBLE)
+                      - temperature (DOUBLE)
+                      - salinity (DOUBLE)
+
+                      ---
+
+                      IMPORTANT RULES:
+
+                      - ALWAYS aggregate large datasets
+                      - NEVER return raw large data
+                      - Use GROUP BY for trends
+                      - Use AVG(), MIN(), MAX() when appropriate
+                      - Time-based queries → GROUP BY DATE(time)
+                      - Depth-based queries → GROUP BY depth
+                      - Limit results if needed
+
+                      ---
+
+                      OUTPUT FORMAT (STRICT JSON):
+
+                      {
+                        "type": "hybrid",
+                        "chart": "line | depth_profile | map",
+                        "sql": "SQL QUERY",
+                        "x": "column_name",
+                        "y": "column_name",
+                        "explanation": "clear natural language explanation of expected trend",
+                        "data_description": "what the query returns"
+                      }
+
+                      ---
+
+                      EXPLANATION RULES:
+
+                      - Explain the trend logically (not just restate the query)
+                      - Mention oceanographic reasoning if possible
+                      - Keep it concise (2–4 lines)
+                      - Do NOT say "based on the query"
+                      - Do NOT include SQL in explanation
+
+                      ---
+
+                      OUTPUT RULES (VERY STRICT):
+
+                      - Return ONLY valid JSON
+                      - Do NOT include markdown
+                      - Do NOT wrap JSON in a string
+                      - Do NOT add extra text
+                      - Response must start with { and end with }
+
+                      ---
+
+                      EXAMPLE:
+
+                      User: Why does temperature decrease with depth?
+
+                      Output:
+                      {
+                        "type": "hybrid",
+                        "chart": "depth_profile",
+                        "sql": "SELECT depth, AVG(temperature) as temperature FROM profiles GROUP BY depth ORDER BY depth",
+                        "x": "temperature",
+                        "y": "depth",
+                        "explanation": "Temperature decreases with depth because sunlight heats only the surface layers. Deeper water receives less solar radiation, leading to colder temperatures.",
+                        "data_description": "Average temperature at different depths"
+                      }
+
+                    `,
+        },
+        {
+          role: "user",
+          content: message,
+        },
+      ],
+      model: "llama-3.3-70b-versatile",
+    });
+
+    const data = JSON.parse(completion.choices[0].message.content);
+
+    res.json(data);
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Something went wrong", message: error });
+  }
+});
+
 
 const PORT = process.env.PORT || 5000;
 
