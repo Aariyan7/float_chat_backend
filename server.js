@@ -286,6 +286,7 @@ app.post("/api/chat/hybridQuery", async (req, res) => {
                       - profile_id (INT)
                       - float_id (INT, FOREIGN KEY → floats.float_id)
                       - time (TIMESTAMP)
+                      - region ENUM('Bay of Bengal', 'Arabian Sea')
                       - latitude (DOUBLE)
                       - longitude (DOUBLE)
                       - depth (DOUBLE)
@@ -302,7 +303,7 @@ app.post("/api/chat/hybridQuery", async (req, res) => {
                       - Use AVG(), MIN(), MAX() when appropriate
                       - Time-based queries → GROUP BY DATE(time)
                       - Depth-based queries → GROUP BY depth
-                      - Limit results if needed
+                      - Limit results if needed 
 
                       ---
 
